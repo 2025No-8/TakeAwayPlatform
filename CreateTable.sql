@@ -1,3 +1,4 @@
+USE TakeAwayDatabase;
 -- 用户表(user）
 CREATE TABLE `USER` (
   `userId` VARCHAR(36) NOT NULL,
@@ -18,7 +19,7 @@ CREATE TABLE `USER` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
---用户地址表
+-- 用户地址表
 CREATE TABLE `USER_ADDRESS` (
   `addressId` VARCHAR(36) NOT NULL,
   `userId` VARCHAR(36) NOT NULL,
@@ -34,7 +35,7 @@ CREATE TABLE `USER_ADDRESS` (
 
 -- 商家表(MERCHANT)
 CREATE TABLE `MERCHANT` (
-  `merchantId` VARCHAR(36) NOT NULL,
+  `merchantId` VARCHAR(255) NOT NULL,
   `name` VARCHAR(100) NOT NULL,
   `description` TEXT,
   `address` VARCHAR(255) NOT NULL,
@@ -54,7 +55,7 @@ CREATE TABLE `MERCHANT` (
 -- 菜品分类表(DISH_CATEGORY)
 CREATE TABLE `DISH_CATEGORY` (
   `categoryId` VARCHAR(36) NOT NULL,
-  `merchantId` VARCHAR(36) NOT NULL,
+  `merchantId` VARCHAR(255) NOT NULL,
   `categoryName` VARCHAR(50) NOT NULL,
   `sortOrder` INT NOT NULL DEFAULT 0,
   PRIMARY KEY (`categoryId`),
@@ -67,7 +68,7 @@ CREATE TABLE `DISH_CATEGORY` (
 -- 菜品表(dish)
 CREATE TABLE `DISH` (
   `dishId` VARCHAR(36) NOT NULL,
-  `merchantId` VARCHAR(36) NOT NULL,
+  `merchantId` VARCHAR(255) NOT NULL,
   `categoryId` VARCHAR(36) NOT NULL,
   `name` VARCHAR(100) NOT NULL,
   `description` TEXT,
@@ -95,7 +96,7 @@ CREATE TABLE `DISH` (
 CREATE TABLE `ORDER` (
   `orderId` VARCHAR(36) NOT NULL,
   `userId` VARCHAR(36) NOT NULL,
-  `merchantId` VARCHAR(36) NOT NULL,
+  `merchantId` VARCHAR(255) NOT NULL,
   `totalPrice` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `status` VARCHAR(30) NOT NULL DEFAULT 'PENDING_PAYMENT',
   `orderTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -118,6 +119,8 @@ CREATE TABLE `ORDER` (
   CONSTRAINT `fk_order_merchant` FOREIGN KEY (`merchantId`) REFERENCES `MERCHANT` (`merchantId`),
   CONSTRAINT `fk_order_address` FOREIGN KEY (`addressId`) REFERENCES `USER_ADDRESS` (`addressId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 
 -- 订单项表(ORDER_ITEM)
 CREATE TABLE `ORDER_ITEM` (
@@ -173,6 +176,11 @@ CREATE TABLE `DELIVERY_INFO` (
   INDEX `idx_deliveryPersonId` (`deliveryPersonId`),
   CONSTRAINT `fk_delivery_info_order` FOREIGN KEY (`orderId`) REFERENCES `ORDER` (`orderId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+
+
+
 
 -- 用户评论表(USER_COMMENT)
 CREATE TABLE `USER_COMMENT` (
