@@ -36,6 +36,10 @@ namespace TakeAwayPlatform
 
         Json::Value parse_json(const std::string& jsonStr);
 
+        std::string generate_uuid();
+
+        std::string generate_short_id(int length = 4);
+
 
     private:
         httplib::Server server;
