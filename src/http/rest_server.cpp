@@ -601,6 +601,52 @@ namespace TakeAwayPlatform
             });
         });
 
+        server.Post("/comment/add", [&](const httplib::Request& req, httplib::Response& res)
+        {
+            threadPool.enqueue([this, req, &res] {
+                try {
+                    std::cout << "/comment/add request body: " << req.body << std::endl;
+
+                    Json::Value comment = parse_json(req.body);
+
+                    // ✅ 从 JSON 中读取字段（userId必填，其他可选）
+                    const std::string commentId = generate_uuid();
+                    const std::string userId = comment["userId"].asString();
+                    const std::string dishId = comment.get("dishId", "").asString();
+                    const int rating = comment.get("rating", 5).asInt();
+                    const std::string content = comment.get("content", "").asString();
+
+                    // ✅ 控制台打印，便于调试与追踪
+                    std::cout << "[添加评论] commentId: " << commentId << std::endl;
+                    std::cout << "[添加评论] userId: " << userId << std::endl;
+                    std::cout << "[添加评论] dishId: " << dishId << std::endl;
+                    std::cout << "[添加评论] rating: " << rating << std::endl;
+                    std::cout << "[添加评论] content: " << content << std::endl;
+
+                    auto db = acquire_db_handler();
+
+                    // ✅ 构造 SQL 插入语句
+                    std::ostringstream sql;
+                    sql << "INSERT INTO USER_COMMENT "
+                        << "(commentId, userId, dishId, rating, content, commentTime) "
+                        << "VALUES ('" << commentId << "', '"
+                        << userId << "', '"
+                        << dishId << "', "
+                        << rating << ", '"
+                        << content << "', NOW())";
+
+                    db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    res.set_content("{\"status\":\"success\"}", "application/json");
+
+                } catch (const std::exception& e) {
+                    res.status = 500;
+                    res.set_content("{\"status\":\"error\", \"message\": \"" + std::string(e.what()) + "\"}", "application/json");
+                }
+            });
+        });
+
 
 
 
@@ -643,7 +689,7 @@ namespace TakeAwayPlatform
         }
 
         return ss.str(); // 返回长度为 36 的标准 UUID
-}
+    }
 
     //生成adressid的函数
 
