@@ -485,6 +485,52 @@ namespace TakeAwayPlatform
                 }
             });
         });
+
+        server.Post("/merchant/login_user", [&](const httplib::Request& req, httplib::Response& res) 
+        {
+            threadPool.enqueue([this, req, &res] {
+                try {
+                    std::cout << "/merchant/login_user request body: " << req.body << std::endl;
+
+                    Json::Value loginReq = parse_json(req.body);
+
+                    const std::string userId = loginReq["userId"].asString();
+                    const std::string username = loginReq["username"].asString();
+                    const std::string passwordHash = loginReq["passwordHash"].asString();
+
+                    std::cout << "[登录接口] userId: " << userId << std::endl;
+                    std::cout << "[登录接口] username: " << username << std::endl;
+                    std::cout << "[登录接口] passwordHash: " << passwordHash << std::endl;
+
+                    auto db = acquire_db_handler();
+
+                    std::ostringstream sql;
+                    sql << "SELECT * FROM USER WHERE userId = '" << userId
+                        << "' AND username = '" << username
+                        << "' AND passwordHash = '" << passwordHash << "'";
+
+                    std::cout << "[登录接口] 执行查询 SQL: " << sql.str() << std::endl;
+
+                    auto result = db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    if (!result.empty()) {
+                        std::cout << "[登录接口] 查询成功：可以登录！" << std::endl;
+                        res.set_content("{\"status\":\"success\", \"message\":\"查询成功，可以登录\"}", "application/json");
+                    } else {
+                        std::cout << "[登录接口] 查询失败：未查到对应账号" << std::endl;
+                        res.status = 401;
+                        res.set_content("{\"status\":\"fail\", \"message\":\"未查询到对应账号，请检查id/姓名/密码\"}", "application/json");
+                    }
+
+                } catch (const std::exception& e) {
+                    std::cout << "[登录接口] 异常错误: " << e.what() << std::endl;
+                    res.status = 500;
+                    res.set_content("{\"status\":\"error\", \"message\": \"" + std::string(e.what()) + "\"}", "application/json");
+                }
+            });
+        });
+    
         // 提交订单接口
         server.Post("/order/create", [&](const httplib::Request& req, httplib::Response& res)
         {
@@ -647,6 +693,109 @@ namespace TakeAwayPlatform
             });
         });
 
+             // 添加管理员接口（重点在管理员信息插入）
+        server.Post("/admin/add_admin", [&](const httplib::Request& req, httplib::Response& res)
+        {
+            threadPool.enqueue([this, req, &res] {
+                try {
+                    std::cout << "/admin/add_admin request body: " << req.body << std::endl;
+
+                    Json::Value admin = parse_json(req.body);
+
+                    // ✅ 自动生成 adminId 和当前时间
+                    const std::string adminId = generate_admin_id();
+                    const std::string currentTime = current_time_string(); // 🕒✨ 自动获取当前时间
+
+                    // ✅ 解析用户输入字段
+                    const std::string username = admin["username"].asString();
+                    const std::string passwordHash = admin["passwordHash"].asString();
+                    const std::string role = admin.get("role", "operator").asString(); // 默认为 operator
+
+                    // ✅ 控制台日志输出
+                    std::cout << "[管理员接口] adminId（自动生成）: " << adminId << std::endl;
+                    std::cout << "[管理员接口] username: " << username << std::endl;
+                    std::cout << "[管理员接口] passwordHash: " << passwordHash << std::endl;
+                    std::cout << "[管理员接口] role: " << role << std::endl;
+                    std::cout << "[管理员接口] lastLogin（系统生成）: " << currentTime << std::endl;
+
+                    auto db = acquire_db_handler();
+
+                    std::ostringstream sql;
+                    sql << "INSERT INTO ADMIN_USER (adminId, username, passwordHash, role, lastLogin) VALUES ('"
+                        << adminId << "', '"
+                        << username << "', '"
+                        << passwordHash << "', '"
+                        << role << "', '"
+                        << currentTime << "')";
+
+                    std::cout << "[管理员接口] 执行 SQL: " << sql.str() << std::endl;
+
+                    db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    Json::Value response;
+                    response["status"] = "success";
+                    response["message"] = "管理员添加成功！";
+                    response["adminId"] = adminId;  // ✅ 返回生成的 ID！
+
+                    Json::StreamWriterBuilder writer;
+                    res.set_content(Json::writeString(writer, response), "application/json");
+
+
+                } catch (const std::exception& e) {
+                    std::cout << "[管理员接口] 错误：" << e.what() << std::endl;
+                    res.status = 500;
+                    res.set_content("{\"status\":\"error\", \"message\": \"" + std::string(e.what()) + "\"}", "application/json");
+                }
+            });
+        });
+
+               // 管理员登录接口(关键在于查询)
+        server.Post("/admin/login_admin", [&](const httplib::Request& req, httplib::Response& res) 
+        {
+            threadPool.enqueue([this, req, &res] {
+                try {
+                    std::cout << "/admin/login_admin request body: " << req.body << std::endl;
+
+                    Json::Value loginReq = parse_json(req.body);
+
+                    const std::string adminId = loginReq["adminId"].asString();
+                    const std::string username = loginReq["username"].asString();
+                    const std::string passwordHash = loginReq["passwordHash"].asString();
+
+                    std::cout << "[管理员登录接口] adminId: " << adminId << std::endl;
+                    std::cout << "[管理员登录接口] username: " << username << std::endl;
+                    std::cout << "[管理员登录接口] passwordHash: " << passwordHash << std::endl;
+
+                    auto db = acquire_db_handler();
+
+                    std::ostringstream sql;
+                    sql << "SELECT * FROM ADMIN_USER WHERE adminId = '" << adminId
+                        << "' AND username = '" << username
+                        << "' AND passwordHash = '" << passwordHash << "'";
+
+                    std::cout << "[管理员登录接口] 执行查询 SQL: " << sql.str() << std::endl;
+
+                    auto result = db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    if (!result.empty()) {
+                        std::cout << "[管理员登录接口] 查询成功：可以登录！" << std::endl;
+                        res.set_content("{\"status\":\"success\", \"message\":\"查询成功，可以登录\"}", "application/json");
+                    } else {
+                        std::cout << "[管理员登录接口] 查询失败：未查到对应账号" << std::endl;
+                        res.status = 401;
+                        res.set_content("{\"status\":\"fail\", \"message\":\"未查询到对应账号，请检查id/用户名/密码\"}", "application/json");
+                    }
+
+                } catch (const std::exception& e) {
+                    std::cout << "[管理员登录接口] 异常错误: " << e.what() << std::endl;
+                    res.status = 500;
+                    res.set_content("{\"status\":\"error\", \"message\": \"" + std::string(e.what()) + "\"}", "application/json");
+                }
+            });
+        });
+
 
 
 
@@ -706,6 +855,36 @@ namespace TakeAwayPlatform
             return result;
         }
     }
+
+        //生成管理员id的函数
+    std::string RestServer::generate_admin_id(int length)
+     {
+        std::stringstream ss;
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(0, 15); // 16进制字符下标
+
+        const char* hex = "0123456789abcdef";
+
+        for (int i = 0; i < length; ++i) {
+            ss << hex[dis(gen)];
+        }
+
+        return ss.str(); 
+    }
+
+        //自动生成时间戳
+    std::string RestServer::current_time_string() 
+    {
+        time_t rawtime;
+        time(&rawtime);
+        struct tm* timeinfo = localtime(&rawtime);
+
+        char buffer[80];
+        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+
+        return std::string(buffer);
+    }   
 
 
 }
