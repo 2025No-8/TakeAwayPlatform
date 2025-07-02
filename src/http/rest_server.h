@@ -40,6 +40,10 @@ namespace TakeAwayPlatform
 
         std::string generate_short_id(int length = 4);
 
+        std::string generate_admin_id(int length = 6);
+
+        std::string current_time_string();
+
 
     private:
         httplib::Server server;
