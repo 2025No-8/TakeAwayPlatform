@@ -491,6 +491,7 @@ namespace TakeAwayPlatform
             });
         });
 
+        //用户登录
         server.Post("/merchant/login_user", [&](const httplib::Request& req, httplib::Response& res) 
         {
             threadPool.enqueue([this, req, &res] {
@@ -536,36 +537,57 @@ namespace TakeAwayPlatform
             });
         });
     
-        // 提交订单接口
-        server.Post("/order/create", [&](const httplib::Request& req, httplib::Response& res)
-        {
+        // 添加订单接口
+        server.Post("/order/create", [&](const httplib::Request& req, httplib::Response& res) {
             threadPool.enqueue([this, req, &res] {
                 try {
                     std::cout << "/order/create request body: " << req.body << std::endl;
 
                     Json::Value order = parse_json(req.body);
 
-                    // ✅ 提取字段
-                    const std::string orderId = order.get("orderId", generate_uuid()).asString(); // 允许前端提供或后端生成
+                    const std::string orderId = order.get("orderId", generate_uuid()).asString();
                     const std::string userId = order["userId"].asString();
                     const std::string merchantId = order["merchantId"].asString();
                     const std::string addressId = order["addressId"].asString();
                     const std::string remark = order.get("remark", "").asString();
                     double totalPrice = order["totalPrice"].asDouble();
 
-                    std::cout << "Creating order for userId: " << userId << ", merchantId: " << merchantId << std::endl;
-                    std::cout << "Total Price: " << totalPrice << ", Address: " << addressId << std::endl;
+                    // 生成时间字段
+                    std::string orderTime = RestServer::current_time_string();
+                    std::string paymentTime = orderTime;
+
+                    // 预计送达时间 = 当前时间 + 30 分钟
+                    time_t rawTime;
+                    time(&rawTime);
+                    rawTime += 30 * 60;
+                    struct tm* estimatedInfo = localtime(&rawTime);
+                    char estimatedBuf[80];
+                    strftime(estimatedBuf, sizeof(estimatedBuf), "%Y-%m-%d %H:%M:%S", estimatedInfo);
+                    std::string estimatedDeliveryTime = estimatedBuf;
+
+                    // 实际送达时间，如果没有就默认 = 预计送达时间即 = 当前时间 + 30 分钟
+                    std::string actualDeliveryTime = order.get("actualDeliveryTime", estimatedDeliveryTime).asString();
+
+                    std::cout << "[订单接口] orderId: " << orderId << std::endl;
+                    std::cout << "[订单接口] orderTime: " << orderTime << std::endl;
+                    std::cout << "[订单接口] paymentTime: " << paymentTime << std::endl;
+                    std::cout << "[订单接口] estimatedDeliveryTime: " << estimatedDeliveryTime << std::endl;
+                    std::cout << "[订单接口] actualDeliveryTime: " << actualDeliveryTime << std::endl;
 
                     auto db = acquire_db_handler();
 
-                    // ✅ 插入订单主表
+                    // 插入订单主表
                     std::ostringstream order_sql;
-                    order_sql << "INSERT INTO `ORDER` (orderId, userId, merchantId, totalPrice, status, orderTime, addressId, remark) "
-                            << "VALUES ('" << orderId << "', '" << userId << "', '" << merchantId << "', "
-                            << totalPrice << ", 'PENDING_PAYMENT', NOW(), '" << addressId << "', '" << remark << "')";
+                    order_sql << "INSERT INTO `ORDER` (orderId, userId, merchantId, totalPrice, status, orderTime, paymentTime, "
+                            << "estimatedDeliveryTime, actualDeliveryTime, addressId, remark) VALUES ('"
+                            << orderId << "', '" << userId << "', '" << merchantId << "', " << totalPrice
+                            << ", 'PENDING_PAYMENT', '" << orderTime << "', '" << paymentTime << "', '"
+                            << estimatedDeliveryTime << "', '" << actualDeliveryTime << "', '"
+                            << addressId << "', '" << remark << "')";
+
                     db->query(order_sql.str());
 
-                    // ✅ 插入订单项
+                    // 插入订单项
                     const Json::Value& items = order["items"];
                     for (const auto& item : items) {
                         const std::string orderItemId = generate_uuid();
@@ -574,18 +596,15 @@ namespace TakeAwayPlatform
                         double price = item["price"].asDouble();
                         int quantity = item["quantity"].asInt();
 
-                        std::cout << "Adding item: " << dishName << " (" << quantity << " x " << price << ")" << std::endl;
-
                         std::ostringstream item_sql;
-                        item_sql << "INSERT INTO ORDER_ITEM (orderItemId, orderId, dishId, dishName, price, quantity) "
-                                << "VALUES ('" << orderItemId << "', '" << orderId << "', '" << dishId << "', '"
-                                << dishName << "', " << price << ", " << quantity << ")";
+                        item_sql << "INSERT INTO ORDER_ITEM (orderItemId, orderId, dishId, dishName, price, quantity) VALUES ('"
+                                << orderItemId << "', '" << orderId << "', '" << dishId << "', '" << dishName << "', "
+                                << price << ", " << quantity << ")";
                         db->query(item_sql.str());
                     }
-
+                    
                     release_db_handler(std::move(db));
 
-                    // ✅ 返回响应
                     Json::Value response;
                     response["status"] = "success";
                     response["orderId"] = orderId;
@@ -593,7 +612,7 @@ namespace TakeAwayPlatform
                     Json::StreamWriterBuilder writer;
                     res.set_content(Json::writeString(writer, response), "application/json");
 
-                } catch (const std::exception& e) {
+                    } catch (const std::exception& e) {
                     res.status = 500;
                     res.set_content("{\"status\":\"error\", \"message\": \"" + std::string(e.what()) + "\"}", "application/json");
                 }
@@ -652,6 +671,7 @@ namespace TakeAwayPlatform
             });
         });
 
+        //添加菜品评论
         server.Post("/comment/add", [&](const httplib::Request& req, httplib::Response& res)
         {
             threadPool.enqueue([this, req, &res] {
@@ -1218,6 +1238,68 @@ namespace TakeAwayPlatform
                 res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
             }
         });
+
+        //查看菜品评价
+       server.Get(R"(/dish/reviews)", [&](const httplib::Request& req, httplib::Response& res) 
+        {
+            std::cout << "/dish/reviews request body: " << req.body << std::endl;
+
+            Json::Value requestJson = parse_json(req.body);
+            std::string dishId = requestJson["dishId"].asString();
+            std::cout << "/dish/reviews dishId: " << dishId << std::endl;
+
+            auto task_ptr = std::make_shared<std::packaged_task<std::string()> >([this, dishId]() {
+                std::cout << "[GET] /dish/" << dishId << "/reviews" << std::endl;
+
+                Json::Value response;
+                try 
+                {
+                    auto db = acquire_db_handler();
+
+                    std::ostringstream sql;
+                    sql << "SELECT r.commentId, r.userId, u.username, r.rating, r.content, "
+
+                        << "DATE_FORMAT(r.commentTime, '%Y-%m-%d %H:%i:%s') AS commentTime "
+
+                        << "FROM USER_COMMENT r "
+                        << "LEFT JOIN USER u ON r.userId = u.userId "
+                    << "WHERE r.dishId = '" << dishId << "' "
+                    << "ORDER BY r.commentTime DESC";
+
+                    Json::Value result = db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    response["status"] = "success";
+                    response["dishId"] = dishId;
+                    response["reviews"] = result;
+                } 
+                catch (const std::exception& e) 
+                {
+                    response["status"] = "error";
+                    response["message"] = e.what();
+                }
+
+                return response.toStyledString();
+            });
+
+            std::future<std::string> result_future = task_ptr->get_future();
+            threadPool.enqueue([task_ptr] 
+            {
+                (*task_ptr)();
+            });
+
+            try 
+            {
+                std::string result = result_future.get();
+                std::cout << "/dish/reviews result: " << result << std::endl;
+                res.set_content(result, "application/json");
+            } 
+            catch (const std::exception& e) 
+            {
+                res.status = 500;
+                res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
+            }
+        });
  
 
 
@@ -1303,6 +1385,21 @@ namespace TakeAwayPlatform
 
         return std::string(buffer);
     }   
+
+    // 在当前时间字符串基础上加N分钟
+    std::string RestServer::add_minutes(const std::string& timeStr, int minutes)
+    {
+        struct tm tm_time = {};
+        strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &tm_time);
+        time_t t = mktime(&tm_time);
+        t += minutes * 60;
+
+        struct tm* new_time = localtime(&t);
+        char buffer[80];
+        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", new_time);
+
+        return std::string(buffer);
+    }
 
 
 }
