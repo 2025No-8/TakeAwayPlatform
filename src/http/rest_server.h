@@ -44,6 +44,8 @@ namespace TakeAwayPlatform
 
         std::string current_time_string();
 
+        std::string add_minutes(const std::string& timeStr, int minutes);
+
 
     private:
         httplib::Server server;
