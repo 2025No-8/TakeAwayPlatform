@@ -1,5 +1,10 @@
 #include <iostream>
 #include <thread>
+#include <cppconn/driver.h>
+#include <cppconn/connection.h>
+#include <cppconn/prepared_statement.h>
+#include <cppconn/resultset.h>
+#include <future>
 
 #include "rest_server.h"
 
@@ -794,6 +799,103 @@ namespace TakeAwayPlatform
                     res.set_content("{\"status\":\"error\", \"message\": \"" + std::string(e.what()) + "\"}", "application/json");
                 }
             });
+        });
+
+        // 插入商家评价接口
+        server.Post("/review/create/review/create", [&](const httplib::Request& req, httplib::Response& res) {
+            threadPool.enqueue([this, req, &res] {
+                try {
+                    Json::Value review = parse_json(req.body);
+
+                    const std::string reviewId = review.get("reviewId", generate_uuid()).asString();
+                    const std::string userId = review["userId"].asString();
+                    const std::string merchantId = review["merchantId"].asString();
+                    int rating = review["rating"].asInt();
+                    const std::string content = review["content"].asString();
+
+                    std::cout << "Creating review for userId: " << userId << ", merchantId: " << merchantId << std::endl;
+
+                    // 使用自定义函数生成当前时间字符串
+                    std::string reviewTime = RestServer::current_time_string();
+
+                    auto db = acquire_db_handler();
+
+                    std::ostringstream review_sql;
+                    review_sql << "INSERT INTO MERCHANT_REVIEW (reviewId, userId, merchantId, rating, content, reviewTime) "
+                            << "VALUES ('" << reviewId << "', '" << userId << "', '" << merchantId << "', "
+                            << rating << ", '" << content << "', '" << reviewTime << "')";
+                    db->query(review_sql.str());
+
+                    release_db_handler(std::move(db));
+
+                    Json::Value response;
+                    response["status"] = "success";
+                    response["reviewId"] = reviewId;
+
+                    Json::StreamWriterBuilder writer;
+                    res.set_content(Json::writeString(writer, response), "application/json");
+
+                } catch (const std::exception& e) {
+                    res.status = 500;
+                    res.set_content("{\"status\":\"error\", \"message\": \"" + std::string(e.what()) + "\"}", "application/json");
+                }
+            });
+        });
+
+
+        // 查看某个商家的评论列表
+        server.Get(R"(/merchant/reviews)", [&](const httplib::Request& req, httplib::Response& res) {
+            // 拿到路径参数中的 merchantId
+            std::cout << "/merchant/reviews request body: " << req.body << std::endl;
+            Json::Value requestResult = parse_json(req.body);
+            std::string merchantId = requestResult["merchant_id"].asString();
+            std::cout << "/merchant/reviews merchantId: " << merchantId << std::endl;
+
+            // 包装任务
+            auto task_ptr = std::make_shared<std::packaged_task<std::string()> >([this, merchantId]() {
+                std::cout << "[GET] /merchant/" << merchantId << "/reviews" << std::endl;
+ 
+                Json::Value response;
+                try {
+                    auto db = acquire_db_handler();
+
+                    std::ostringstream sql;
+                    sql << "SELECT r.reviewId, r.userId, u.username, r.rating, r.content, r.reviewTime "
+                        << "FROM MERCHANT_REVIEW r "
+                        << "LEFT JOIN USER u ON r.userId = u.userId "
+                        << "WHERE r.merchantId = '" << merchantId << "' "
+                        << "ORDER BY r.reviewTime DESC";
+
+                    Json::Value result = db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    response["status"] = "success";
+                    response["merchantId"] = merchantId;
+                    response["reviews"] = result;
+
+                } catch (const std::exception& e) {
+                    response["status"] = "error";
+                    response["message"] = e.what();
+                }
+
+                return response.toStyledString();
+            });
+
+            // 提交任务
+            std::future<std::string> result_future = task_ptr->get_future();
+            threadPool.enqueue([task_ptr] {
+                (*task_ptr)();
+            });
+
+            // 返回响应
+            try {
+                std::string result = result_future.get();
+                std::cout << "/merchant/:id/reviews result: " << result << std::endl;
+                res.set_content(result, "application/json");
+            } catch (const std::exception& e) {
+                res.status = 500;
+                res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
+            }
         });
 
 
