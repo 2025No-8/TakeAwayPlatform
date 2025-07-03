@@ -898,10 +898,326 @@ namespace TakeAwayPlatform
             }
         });
 
+        // 查看某个商家的菜品列表
+        server.Get(R"(/merchant/dishes)", [&](const httplib::Request& req, httplib::Response& res) 
+        {
+            // 打印请求体
+            std::cout << "/merchant/dishes request body: " << req.body << std::endl;
+
+            Json::Value requestJson = parse_json(req.body);
+            std::string merchantId = requestJson["merchantId"].asString();
+            std::cout << "/merchant/dishes merchantId: " << merchantId << std::endl;
+
+            // 包装异步任务
+            auto task_ptr = std::make_shared<std::packaged_task<std::string()> >([this, merchantId]() {
+                std::cout << "[GET] /merchant/" << merchantId << "/dishes" << std::endl;
+
+                Json::Value response;
+
+                try {
+                    auto db = acquire_db_handler();
+
+                    std::ostringstream sql;
+                    sql << "SELECT dishId, merchantId, Name, description, price, imageUrl, categoryId "
+                        << "FROM DISH "
+                        << "WHERE merchantId = '" << merchantId << "' "
+                        << "ORDER BY Name ASC";
+
+                    Json::Value result = db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    response["status"] = "success";
+                    response["merchantId"] = merchantId;
+                    response["dishes"] = result;
+
+                } catch (const std::exception& e) {
+                    response["status"] = "error";
+                    response["message"] = e.what();
+                }
+
+                return response.toStyledString();
+            });
+
+            // 提交任务
+            std::future<std::string> result_future = task_ptr->get_future();
+            threadPool.enqueue([task_ptr] {
+                (*task_ptr)();
+            });
+
+            // 设置返回响应
+            try {
+                std::string result = result_future.get();
+                std::cout << "/merchant/dishes result: " << result << std::endl;
+                res.set_content(result, "application/json");
+            } catch (const std::exception& e) {
+                res.status = 500;
+                res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
+            }
+        });
+
+        //配送信息接口
+        server.Post("/merchant/add_delivery_info", [&](const httplib::Request& req, httplib::Response& res)
+        {
+            threadPool.enqueue([this, req, &res] {
+                try {
+                    std::cout << "/merchant/add_delivery_info request body: " << req.body << std::endl;
+
+                    Json::Value deliveryData = parse_json(req.body);
+
+                    // ✅ 自动生成配送ID
+                    const std::string deliveryId = generate_short_id();
+                    
+                    // ✅ 解析必填字段
+                    const std::string orderId = deliveryData["orderId"].asString();
+                    const std::string deliveryStatus = deliveryData.get("deliveryStatus", "PENDING_PICKUP").asString();
+                    
+                    // ✅ 解析可选字段
+                    const std::string estimatedDeliveryTime = deliveryData.get("estimatedDeliveryTime", "").asString();
+                    const std::string actualDeliveryTime = deliveryData.get("actualDeliveryTime", "").asString();
+                    const std::string deliveryPersonId = deliveryData.get("deliveryPersonId", "").asString();
+                    const std::string deliveryPersonName = deliveryData.get("deliveryPersonName", "").asString();
+                    const std::string deliveryPersonPhone = deliveryData.get("deliveryPersonPhone", "").asString();
+
+                    // ✅ 控制台日志输出
+                    std::cout << "[配送信息接口] deliveryId（自动生成）: " << deliveryId << std::endl;
+                    std::cout << "[配送信息接口] orderId: " << orderId << std::endl;
+                    std::cout << "[配送信息接口] deliveryStatus: " << deliveryStatus << std::endl;
+                    std::cout << "[配送信息接口] estimatedDeliveryTime: " << estimatedDeliveryTime << std::endl;
+                    std::cout << "[配送信息接口] actualDeliveryTime: " << actualDeliveryTime << std::endl;
+                    std::cout << "[配送信息接口] deliveryPersonId: " << deliveryPersonId << std::endl;
+                    std::cout << "[配送信息接口] deliveryPersonName: " << deliveryPersonName << std::endl;
+                    std::cout << "[配送信息接口] deliveryPersonPhone: " << deliveryPersonPhone << std::endl;
+
+                    auto db = acquire_db_handler();
+
+                    // ✅ 构造SQL插入语句
+                    std::ostringstream sql;
+                    sql << "INSERT INTO DELIVERY_INFO ("
+                        << "deliveryId, orderId, deliveryStatus, estimatedDeliveryTime, "
+                        << "actualDeliveryTime, deliveryPersonId, deliveryPersonName, deliveryPersonPhone"
+                        << ") VALUES ('"
+                        << deliveryId << "', '"
+                        << orderId << "', '"
+                        << deliveryStatus << "', "
+                        << (estimatedDeliveryTime.empty() ? "NULL" : "'" + estimatedDeliveryTime + "'") << ", "
+                        << (actualDeliveryTime.empty() ? "NULL" : "'" + actualDeliveryTime + "'") << ", "
+                        << (deliveryPersonId.empty() ? "NULL" : "'" + deliveryPersonId + "'") << ", "
+                        << (deliveryPersonName.empty() ? "NULL" : "'" + deliveryPersonName + "'") << ", "
+                        << (deliveryPersonPhone.empty() ? "NULL" : "'" + deliveryPersonPhone + "'") << ")";
+
+                    std::cout << "[配送信息接口] 执行 SQL: " << sql.str() << std::endl;
+
+                    db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    // ✅ 构造响应JSON
+                    Json::Value response;
+                    response["status"] = "success";
+                    response["message"] = "配送信息添加成功！";
+                    response["deliveryId"] = deliveryId;
+
+                    Json::StreamWriterBuilder writer;
+                    res.set_content(Json::writeString(writer, response), "application/json");
+
+                } catch (const std::exception& e) {
+                    std::cout << "[配送信息接口] 错误：" << e.what() << std::endl;
+                    res.status = 500;
+            
+                    // ✅ 错误响应JSON
+                    Json::Value errorResponse;
+                    errorResponse["status"] = "error";
+                    errorResponse["message"] = e.what();
+            
+                    Json::StreamWriterBuilder writer;
+                    res.set_content(Json::writeString(writer, errorResponse), "application/json");
+                }
+            });
+        });
 
 
+        //支付记录接口
+        server.Post("/merchant/add_payment_record", [&](const httplib::Request& req, httplib::Response& res)
+        {
+            threadPool.enqueue([this, req, &res] {
+                try {
+                    std::cout << "/merchant/add_payment_record request body: " << req.body << std::endl;
 
+                    Json::Value paymentData = parse_json(req.body);
 
+                    // ✅ 自动生成支付记录ID
+                    const std::string paymentId = generate_short_id();
+            
+                    // ✅ 获取当前时间作为支付时间
+                    const std::string currentTime = current_time_string();
+            
+                    // ✅ 解析用户输入字段
+                    const std::string orderId = paymentData["orderId"].asString();
+                    const double amount = paymentData["amount"].asDouble();
+                    const std::string paymentMethod = paymentData["paymentMethod"].asString();
+            
+                    // ✅ 可选字段处理（带默认值）
+                    const std::string transactionId = paymentData.get("transactionId", "").asString();
+                    const std::string status = paymentData.get("status", "SUCCESS").asString();
+
+                    // ✅ 控制台日志输出
+                    std::cout << "[支付记录接口] paymentId（自动生成）: " << paymentId << std::endl;
+                    std::cout << "[支付记录接口] orderId: " << orderId << std::endl;
+                    std::cout << "[支付记录接口] amount: " << amount << std::endl;
+                    std::cout << "[支付记录接口] paymentMethod: " << paymentMethod << std::endl;
+                    std::cout << "[支付记录接口] transactionId: " << transactionId << std::endl;
+                    std::cout << "[支付记录接口] status: " << status << std::endl;
+                    std::cout << "[支付记录接口] paymentTime（系统生成）: " << currentTime << std::endl;
+
+                    auto db = acquire_db_handler();
+
+                    // ✅ 构造SQL插入语句（使用字符串拼接）
+                    std::ostringstream sql;
+                    sql << "INSERT INTO PAYMENT_RECORD ("
+                        << "paymentId, orderId, amount, paymentTime, "
+                        << "paymentMethod, transactionId, status"
+                        << ") VALUES ('"
+                        << paymentId << "', '"
+                        << orderId << "', "
+                        << amount << ", '"
+                        << currentTime << "', '"
+                        << paymentMethod << "', '"
+                        << transactionId << "', '"
+                        << status << "')";
+
+                    std::cout << "[支付记录接口] 执行 SQL: " << sql.str() << std::endl;
+
+                    db->query(sql.str());
+                    release_db_handler(std::move(db));
+
+                    // ✅ 构造响应JSON
+                    Json::Value response;
+                    response["status"] = "success";
+                    response["message"] = "支付记录添加成功！";
+                    response["paymentId"] = paymentId;  // ✅ 返回生成的ID！
+
+                    Json::StreamWriterBuilder writer;
+                    res.set_content(Json::writeString(writer, response), "application/json");
+
+                } catch (const std::exception& e) {
+                    std::cout << "[支付记录接口] 错误：" << e.what() << std::endl;
+                    res.status = 500;
+            
+                    // ✅ 错误响应JSON
+                    Json::Value errorResponse;
+                    errorResponse["status"] = "error";
+                    errorResponse["message"] = e.what();
+            
+                    Json::StreamWriterBuilder writer;
+                    res.set_content(Json::writeString(writer, errorResponse), "application/json");
+                }
+            });
+        });
+
+        // 按照名字搜索商家
+        server.Get("/merchants", [&](const httplib::Request& req, httplib::Response& res) {
+            std::string name_keyword = req.get_param_value("name");
+    
+            if (name_keyword.empty()) {
+                Json::Value empty_result(Json::arrayValue);
+                res.set_content(empty_result.toStyledString(), "application/json");
+                return;
+            }
+
+            // 创建异步任务
+            auto task_ptr = std::make_shared<std::packaged_task<std::string()>>([this, name_keyword]() {
+                auto db_handler = acquire_db_handler();
+        
+                // 手动转义特殊字符
+                std::string escaped;
+                escaped.reserve(name_keyword.length() * 2);
+                for (char c : name_keyword) {
+                    if (c == '\'' || c == '\\') {
+                        escaped += '\\';
+                    }
+                escaped += c;
+                }
+        
+                std::string sql = "SELECT * FROM MERCHANT WHERE name LIKE '%" + escaped + "%'";
+                Json::Value merchants = db_handler->query(sql);
+                release_db_handler(std::move(db_handler));
+        
+                std::cout << "Executing SQL: " << sql << std::endl;
+                return merchants.toStyledString();
+            });
+
+            // 获取future并提交任务
+            std::future<std::string> result_future = task_ptr->get_future();
+            threadPool.enqueue([task_ptr] {
+                (*task_ptr)();
+            });
+
+            // 获取结果并设置响应
+            try {
+                std::string result = result_future.get();
+                res.set_content(result, "application/json");
+            } catch (const std::exception& e) {
+                Json::Value error;
+                error["error"] = e.what();
+                res.status = 500;
+                res.set_content(error.toStyledString(), "application/json");
+            }
+        });
+
+        // 查询某个用户的所有订单及其订单项
+        server.Get(R"(/order/query)", [&](const httplib::Request& req, httplib::Response& res) {
+            std::cout << "/order/query request body: " << req.body << std::endl;
+            Json::Value requestJson = parse_json(req.body);
+            std::string userId = requestJson["userId"].asString();
+            std::cout << "[订单查询接口] userId: " << userId << std::endl;
+
+            auto task_ptr = std::make_shared<std::packaged_task<std::string()>>([this, userId]() {
+                Json::Value response;
+
+                try {
+                    auto db = acquire_db_handler();
+
+                    // 查询订单主信息
+                    std::ostringstream order_sql;
+                    order_sql << "SELECT * FROM `ORDER` WHERE userId = '" << userId << "' ORDER BY orderTime DESC";
+                    Json::Value orders = db->query(order_sql.str());
+
+                    // 遍历每个订单，查询它的订单项
+                    for (auto& order : orders) {
+                        std::string orderId = order["orderId"].asString();
+
+                        std::ostringstream item_sql;
+                        item_sql << "SELECT dishId, dishName, price, quantity "
+                                << "FROM ORDER_ITEM WHERE orderId = '" << orderId << "'";
+                        Json::Value items = db->query(item_sql.str());
+
+                        order["items"] = items; // 添加订单项到订单中
+                    }
+
+                    release_db_handler(std::move(db));
+
+                    response["status"] = "success";
+                    response["userId"] = userId;
+                    response["orders"] = orders;
+
+                } catch (const std::exception& e) {
+                    response["status"] = "error";
+                    response["message"] = e.what();
+                }
+
+                return response.toStyledString();
+            });
+
+            std::future<std::string> result_future = task_ptr->get_future();
+            threadPool.enqueue([task_ptr] { (*task_ptr)(); });
+
+            try {
+                std::string result = result_future.get();
+                res.set_content(result, "application/json");
+            } catch (const std::exception& e) {
+                res.status = 500;
+                res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
+            }
+        });
  
 
 
